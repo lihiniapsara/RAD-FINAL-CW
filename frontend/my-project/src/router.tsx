@@ -1,11 +1,9 @@
 import { createBrowserRouter, Navigate, Link } from 'react-router-dom';
-import AuthForms from "./components/LoginForm.tsx";
-import HomePage from "./pages/HomePage.tsx";
-import BooksPage from "./pages/BooksPage.tsx";
-import ReadersPage from "./pages/ReadersPage.tsx";
-import LendingPage from "./pages/OverduePage.tsx";
-import * as path from "path";
-import OverduePage from "./pages/OverduePage.tsx"; // If you meant OverduePage, otherwise use LendingPage.tsx if it exists
+import AuthForms from './components/LoginForm.tsx';
+import BooksPage from './pages/BooksPage.tsx';
+import ReadersPage from './pages/ReadersPage.tsx';
+import SimpleHomePage from './pages/HomePage.tsx';
+import LendingsPage from './pages/LendingsPage.tsx'; // Fixed from LendingsPage.tsx to LendingsPage.tsx
 
 export const router = createBrowserRouter([
     {
@@ -18,22 +16,18 @@ export const router = createBrowserRouter([
     },
     {
         path: '/home',
-        element: <HomePage />,
+        element: <SimpleHomePage />,
     },
     {
-      path: '/books',
-      element: <BooksPage />,
+        path: '/books',
+        element: <BooksPage />,
     },
     {
-      path: '/readers',
-      element: <ReadersPage />,
+        path: '/readers',
+        element: <ReadersPage />,
     },
     {
-      path: '/lendings',
-      element: <LendingPage />,
-    },
-    {
-        path: '/overdue',
-        element: <OverduePage/>,
+        path: '/lendings',
+        element: <LendingsPage />,
     }
 ]);

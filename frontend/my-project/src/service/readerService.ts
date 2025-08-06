@@ -1,21 +1,21 @@
 import apiClient from './apiClient';
-import type { Reader } from '../models/Readers';
+import type { Reader } from '@/types/Readers';
 
 export const getReaders = async (): Promise<Reader[]> => {
-    const response = await apiClient.get('/readers');
+    const response = await apiClient.get('/api/readers');
     return response.data;
 };
 
 export const addReader = async (reader: Omit<Reader, '_id'>): Promise<Reader> => {
-    const response = await apiClient.post('/readers', reader);
+    const response = await apiClient.post('/api/readers', reader);
     return response.data;
 };
 
 export const updateReader = async (id: string, reader: Partial<Reader>): Promise<Reader> => {
-    const response = await apiClient.put(`/readers/${id}`, reader);
+    const response = await apiClient.put(`/api/readers/${id}`, reader);
     return response.data;
 };
 
 export const deleteReader = async (id: string): Promise<void> => {
-    await apiClient.delete(`/readers/${id}`);
+    await apiClient.delete(`/api/readers/${id}`);
 };

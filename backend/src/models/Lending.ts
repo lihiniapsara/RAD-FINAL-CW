@@ -7,7 +7,8 @@ type Lending = {
     borrowedDate: Date,
     dueDate: Date,
     returned: boolean,
-    returnDate: Date
+    returnDate: Date,
+
 
 }
 

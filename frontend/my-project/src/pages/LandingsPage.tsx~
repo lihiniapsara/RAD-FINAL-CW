@@ -1,75 +1,137 @@
-import React, { useState, useEffect } from 'react';
-import { Users, Search, Plus, Edit3, Trash2, X, Save, Calendar, Clock, Grid, List, Mail, Phone, MapPin, User } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { RefreshCw, Search, Plus, Filter, Calendar, Clock, User, BookOpen, CheckCircle, AlertCircle, X, Save, List, Grid, Mail, AlertTriangle, Bell } from 'lucide-react';
+import type { Reader } from '@/types/Readers';
+import type { BorrowBook } from '@/types/BorrowBook';
+import type { Book } from '@/types/Books';
+import { getLendings, lendBook, returnBook } from '@/service/borrowBookService';
+import { getReaders } from '@/service/readerService';
+import { getBooks } from '@/service/bookService';
 
-// Mock reader interface
-interface Reader {
-    _id: string;
+// Extended interfaces
+interface EmailNotification {
     id: string;
-    name: string;
-    email: string;
-    phone: string;
-    address: string;
+    readerId: string;
+    readerName: string;
+    readerEmail: string;
+    bookTitle: string;
+    dueDate: string;
+    daysOverdue: number;
+    sentDate: string;
+    type: 'overdue' | 'reminder';
 }
 
-const ReadersPage: React.FC = () => {
-    const [readers, setReaders] = useState<Reader[]>([
-        {
-            _id: '1',
-            id: 'R001',
-            name: 'John Doe',
-            email: 'john.doe@email.com',
-            phone: '+1-234-567-8900',
-            address: '123 Main St, Anytown USA'
-        },
-        {
-            _id: '2',
-            id: 'R002',
-            name: 'Jane Smith',
-            email: 'jane.smith@email.com',
-            phone: '+1-234-567-8901',
-            address: '456 Oak Ave, Somewhere City'
-        },
-        {
-            _id: '3',
-            id: 'R003',
-            name: 'Mike Johnson',
-            email: 'mike.johnson@email.com',
-            phone: '+1-234-567-8902',
-            address: '789 Pine Rd, Another Town'
-        }
-    ]);
+interface ExtendedBorrowBook extends Omit<BorrowBook, 'readerId' | 'bookId'> {
+    readerId: Reader;
+    bookId: Book;
+    returnedDate?: string;
+    emailSent?: boolean;
+    lastEmailDate?: string;
+}
 
-    const [newReader, setNewReader] = useState<Omit<Reader, '_id'>>({
-        id: '',
-        name: '',
-        email: '',
-        phone: '',
-        address: ''
-    });
-
-    const [editingReader, setEditingReader] = useState<Reader | null>(null);
-    const [search, setSearch] = useState('');
+const LendingsPage: React.FC = () => {
+    const [currentPage, setCurrentPage] = useState<'lendings' | 'overdue'>('lendings');
+    const [lendings, setLendings] = useState<ExtendedBorrowBook[]>([]);
+    const [emailNotifications, setEmailNotifications] = useState<EmailNotification[]>([]);
+    const [readers, setReaders] = useState<Reader[]>([]);
+    const [books, setBooks] = useState<Book[]>([]);
+    const [newLending, setNewLending] = useState({ readerId: '', bookId: '' });
+    const [filterType, setFilterType] = useState<'all' | 'active' | 'returned'>('all');
     const [currentTime, setCurrentTime] = useState(new Date());
-    const [isVisible, setIsVisible] = useState(false);
-    const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
     const [showAddForm, setShowAddForm] = useState(false);
+    const [searchTerm, setSearchTerm] = useState('');
+    const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
+    const [showEmailModal, setShowEmailModal] = useState(false);
+    const [selectedOverdue, setSelectedOverdue] = useState<ExtendedBorrowBook | null>(null);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+
+    // Load data with improved error handling
+    const loadData = useCallback(async () => {
+        try {
+            setLoading(true);
+            setError(null);
+
+            const [readersData, booksData, lendingsData] = await Promise.all([
+                getReaders().catch(err => {
+                    console.error('Failed to fetch readers:', err);
+                    return [];
+                }),
+                getBooks().catch(err => {
+                    console.error('Failed to fetch books:', err);
+                    return [];
+                }),
+                getLendings().catch(err => {
+                    console.error('Failed to fetch lendings:', err);
+                    return [];
+                }),
+            ]);
+
+            if (!readersData.length || !booksData.length || !lendingsData.length) {
+                setError('One or more data sources returned empty results');
+                return;
+            }
+
+            setReaders(readersData);
+            setBooks(booksData);
+
+            const transformedLendings: ExtendedBorrowBook[] = lendingsData.map((lending: BorrowBook) => {
+                const reader = readersData.find((r: Reader) => r._id === lending.readerId);
+                const book = booksData.find((b: Book) => b._id === lending.bookId);
+
+                if (!reader || !book) {
+                    console.warn(`Missing reader or book for lending ID: ${lending._id}`);
+                    return null;
+                }
+
+                return {
+                    ...lending,
+                    readerId: reader,
+                    bookId: book,
+                    emailSent: false,
+                    lastEmailDate: undefined,
+                };
+            }).filter((lending): lending is ExtendedBorrowBook => lending !== null);
+
+            setLendings(transformedLendings);
+            console.log('Transformed Lendings:', transformedLendings);
+        } catch (err) {
+            console.error('Error loading data:', err);
+            setError('Failed to load data. Please try again.');
+        } finally {
+            setLoading(false);
+        }
+    }, []);
 
     useEffect(() => {
-        const timer = setInterval(() => {
-            setCurrentTime(new Date());
-        }, 1000);
-
-        setTimeout(() => setIsVisible(true), 100);
-
+        console.log('Initializing data load...');
+        loadData();
+        const timer = setInterval(() => setCurrentTime(new Date()), 1000);
         return () => clearInterval(timer);
-    }, []);
+    }, [loadData]);
+
+    // Auto email checking
+    useEffect(() => {
+        const checkAndSendEmails = () => {
+            const overdueLendings = lendings.filter(lending => !lending.returned && getDaysOverdue(lending.dueDate) > 0);
+            console.log('Overdue lendings:', overdueLendings.length);
+            overdueLendings.forEach(lending => {
+                if (!lending.emailSent || shouldSendFollowUpEmail(lending.lastEmailDate)) {
+                    sendOverdueEmail(lending);
+                }
+            });
+        };
+
+        const emailTimer = setInterval(checkAndSendEmails, 3600000); // Every hour
+        return () => clearInterval(emailTimer);
+    }, [lendings]);
 
     const formatTime = (date: Date) => {
         return date.toLocaleTimeString('en-US', {
             hour12: true,
             hour: '2-digit',
             minute: '2-digit',
-            second: '2-digit'
+            second: '2-digit',
+            timeZone: 'Asia/Colombo',
         });
     };
 
@@ -78,408 +140,766 @@ const ReadersPage: React.FC = () => {
             weekday: 'long',
             year: 'numeric',
             month: 'long',
-            day: 'numeric'
+            day: 'numeric',
+            timeZone: 'Asia/Colombo',
         });
     };
 
-    const handleAddReader = async () => {
-        const readerWithId = {
-            ...newReader,
-            _id: Date.now().toString()
+    const formatDisplayDate = (dateString: string) => {
+        const date = new Date(dateString);
+        return date.toLocaleDateString('en-US', {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric',
+        });
+    };
+
+    const getDaysOverdue = (dueDate: string) => {
+        const today = new Date();
+        const due = new Date(dueDate);
+        if (isNaN(due.getTime())) {
+            console.warn(`Invalid due date: ${dueDate}`);
+            return 0;
+        }
+        const diffTime = today.getTime() - due.getTime();
+        return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    };
+
+    const shouldSendFollowUpEmail = (lastEmailDate?: string) => {
+        if (!lastEmailDate) return true;
+        const lastEmail = new Date(lastEmailDate);
+        if (isNaN(lastEmail.getTime())) {
+            console.warn(`Invalid last email date: ${lastEmailDate}`);
+            return true;
+        }
+        const today = new Date();
+        const daysSinceLastEmail = Math.ceil((today.getTime() - lastEmail.getTime()) / (1000 * 60 * 60 * 24));
+        return daysSinceLastEmail >= 7;
+    };
+
+    const sendOverdueEmail = (lending: ExtendedBorrowBook) => {
+        const notification: EmailNotification = {
+            id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+            readerId: lending.readerId._id,
+            readerName: lending.readerId.name,
+            readerEmail: lending.readerId.email,
+            bookTitle: lending.bookId.title,
+            dueDate: lending.dueDate,
+            daysOverdue: getDaysOverdue(lending.dueDate),
+            sentDate: new Date().toISOString(),
+            type: 'overdue',
         };
-        setReaders([...readers, readerWithId]);
-        setNewReader({ id: '', name: '', email: '', phone: '', address: '' });
-        setShowAddForm(false);
+
+        setEmailNotifications(prev => [...prev, notification]);
+        setLendings(prev =>
+            prev.map(l => l._id === lending._id ? { ...l, emailSent: true, lastEmailDate: new Date().toISOString().split('T')[0] } : l)
+        );
+
+        console.log(`Overdue email sent to ${lending.readerId.email} for book "${lending.bookId.title}"`);
     };
 
-    const handleEditReader = async () => {
-        if (!editingReader) return;
-
-        setReaders(readers.map(reader =>
-            reader._id === editingReader._id ? editingReader : reader
-        ));
-        setEditingReader(null);
+    const handleManualEmailSend = (lending: ExtendedBorrowBook) => {
+        sendOverdueEmail(lending);
+        setShowEmailModal(false);
+        setSelectedOverdue(null);
     };
 
-    const handleDeleteReader = async (id: string) => {
-        setReaders(readers.filter(reader => reader._id !== id));
+    const handleLendBook = async () => {
+        if (!newLending.readerId || !newLending.bookId) {
+            setError('Please select both a reader and a book');
+            return;
+        }
+
+        try {
+            setLoading(true);
+            setError(null);
+
+            const newLendingData = await lendBook(newLending.readerId, newLending.bookId);
+            const reader = readers.find(r => r._id === newLendingData.readerId);
+            const book = books.find(b => b._id === newLendingData.bookId);
+
+            if (!reader || !book) {
+                setError('Selected reader or book not found');
+                return;
+            }
+
+            const transformedLending: ExtendedBorrowBook = {
+                ...newLendingData,
+                readerId: reader,
+                bookId: book,
+                emailSent: false,
+                lastEmailDate: undefined,
+            };
+
+            setLendings([...lendings, transformedLending]);
+            setBooks(prev =>
+                prev.map(b => b._id === newLendingData.bookId ? { ...b, quantity: b.quantity - 1, available: b.quantity - 1 > 0 } : b)
+            );
+            setNewLending({ readerId: '', bookId: '' });
+            setShowAddForm(false);
+        } catch (err) {
+            console.error('Error lending book:', err);
+            setError('Failed to lend book. Please try again.');
+        } finally {
+            setLoading(false);
+        }
     };
 
-    const filteredReaders = readers.filter(reader =>
-        reader.name.toLowerCase().includes(search.toLowerCase()) ||
-        reader.email.toLowerCase().includes(search.toLowerCase()) ||
-        reader.phone.toLowerCase().includes(search.toLowerCase())
-    );
+    const handleReturnBook = async (id: string) => {
+        try {
+            setLoading(true);
+            setError(null);
 
-    return (
-        <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 text-white relative overflow-hidden">
-            {/* Animated background elements */}
-            <div className="absolute inset-0 overflow-hidden">
-                <div className="absolute -top-40 -right-40 w-80 h-80 bg-purple-500 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-pulse"></div>
-                <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-pink-500 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-pulse"></div>
-                <div className="absolute top-40 left-1/2 w-60 h-60 bg-blue-500 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-pulse"></div>
-            </div>
+            const returnedLending = await returnBook(id);
+            setLendings(prev =>
+                prev.map(lending =>
+                    lending._id === id
+                        ? { ...lending, returned: true, returnedDate: new Date().toISOString().split('T')[0] }
+                        : lending
+                )
+            );
+            setBooks(prev =>
+                prev.map(book =>
+                    book._id === returnedLending.bookId
+                        ? { ...book, quantity: book.quantity + 1, available: true }
+                        : book
+                )
+            );
+        } catch (err) {
+            console.error('Error returning book:', err);
+            setError('Failed to return book. Please try again.');
+        } finally {
+            setLoading(false);
+        }
+    };
 
-            <div className="relative z-10 container mx-auto px-6 py-8">
-                {/* Header */}
-                <div className={`text-center mb-8 transition-all duration-1000 transform ${
-                    isVisible ? 'translate-y-0 opacity-100' : '-translate-y-10 opacity-0'
-                }`}>
-                    <div className="inline-flex items-center gap-4 mb-6 px-6 py-3 bg-white/10 backdrop-blur-lg rounded-full border border-white/20">
-                        <div className="flex items-center gap-2 text-blue-300">
-                            <Calendar size={18} />
-                            <span className="text-sm font-medium">{formatDate(currentTime)}</span>
-                        </div>
-                        <div className="w-px h-6 bg-white/30"></div>
-                        <div className="flex items-center gap-2 text-emerald-300">
-                            <Clock size={18} />
-                            <span className="text-sm font-mono font-bold">{formatTime(currentTime)}</span>
-                        </div>
-                    </div>
+    const filteredLendings = lendings.filter(lending => {
+        const matchesSearch =
+            lending.readerId.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            lending.bookId.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            lending.bookId.author.toLowerCase().includes(searchTerm.toLowerCase());
+        if (filterType === 'active') return matchesSearch && !lending.returned;
+        if (filterType === 'returned') return matchesSearch && lending.returned;
+        return matchesSearch;
+    });
 
-                    <div className="flex items-center justify-center gap-4 mb-4">
-                        <Users size={48} className="text-blue-400" />
-                        <h1 className="text-5xl font-bold bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400 bg-clip-text text-transparent">
-                            Readers Management
-                        </h1>
-                    </div>
-                    <p className="text-gray-400 text-lg">
-                        Manage your library members and their information
-                    </p>
-                </div>
+    const overdueLendings = lendings.filter(l => !l.returned && getDaysOverdue(l.dueDate) > 0);
+    const activeLendings = lendings.filter(l => !l.returned).length;
 
-                {/* Controls */}
-                <div className={`mb-8 transition-all duration-1000 transform ${
-                    isVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'
-                }`} style={{ transitionDelay: '200ms' }}>
-                    <div className="flex flex-col md:flex-row gap-4 items-center justify-between mb-6">
-                        {/* Search Bar */}
+    // UI Components
+    const LendingsPageContent = () => (
+        <div>
+            <div className="mb-8">
+                <div className="flex flex-col md:flex-row gap-4 items-center justify-between mb-6">
+                    <div className="flex flex-col md:flex-row gap-4 flex-1">
                         <div className="relative flex-1 max-w-md">
                             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
                             <input
                                 type="text"
-                                placeholder="Search readers, emails, phones..."
-                                value={search}
-                                onChange={(e) => setSearch(e.target.value)}
-                                className="w-full pl-10 pr-4 py-3 bg-white/10 backdrop-blur-lg border border-white/20 rounded-full text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-300"
+                                placeholder="Search lendings..."
+                                value={searchTerm}
+                                onChange={(e) => setSearchTerm(e.target.value)}
+                                className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                             />
                         </div>
-
-                        {/* Action Buttons */}
-                        <div className="flex gap-3">
-                            <button
-                                onClick={() => setViewMode(viewMode === 'grid' ? 'table' : 'grid')}
-                                className="px-4 py-2 bg-white/10 backdrop-blur-lg border border-white/20 rounded-full text-white hover:bg-white/20 transition-all duration-300 flex items-center gap-2"
-                            >
-                                {viewMode === 'grid' ? <List size={18} /> : <Grid size={18} />}
-                                {viewMode === 'grid' ? 'Table' : 'Grid'}
-                            </button>
-                            <button
-                                onClick={() => setShowAddForm(true)}
-                                className="px-6 py-2 bg-gradient-to-r from-blue-500 to-purple-600 rounded-full text-white hover:from-blue-600 hover:to-purple-700 transition-all duration-300 flex items-center gap-2 shadow-lg hover:shadow-xl transform hover:scale-105"
-                            >
-                                <Plus size={18} />
-                                Add Reader
-                            </button>
-                        </div>
+                        <select
+                            value={filterType}
+                            onChange={(e) => setFilterType(e.target.value as 'all' | 'active' | 'returned')}
+                            className="px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        >
+                            <option value="all">All Lendings</option>
+                            <option value="active">Active Only</option>
+                            <option value="returned">Returned Only</option>
+                        </select>
+                    </div>
+                    <div className="flex gap-3">
+                        <button
+                            onClick={() => setViewMode(viewMode === 'grid' ? 'table' : 'grid')}
+                            className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors flex items-center gap-2"
+                        >
+                            {viewMode === 'grid' ? <List size={18} /> : <Grid size={18} />}
+                            {viewMode === 'grid' ? 'Table' : 'Grid'}
+                        </button>
+                        <button
+                            onClick={() => setShowAddForm(true)}
+                            className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+                        >
+                            <Plus size={18} />
+                            Lend Book
+                        </button>
                     </div>
                 </div>
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                    <div className="bg-white rounded-lg shadow-sm p-4 border">
+                        <div className="text-2xl font-bold text-blue-600">{lendings.length}</div>
+                        <div className="text-gray-600 text-sm">Total Lendings</div>
+                    </div>
+                    <div className="bg-white rounded-lg shadow-sm p-4 border">
+                        <div className="text-2xl font-bold text-green-600">{activeLendings}</div>
+                        <div className="text-gray-600 text-sm">Active Lendings</div>
+                    </div>
+                    <div className="bg-white rounded-lg shadow-sm p-4 border">
+                        <div className="text-2xl font-bold text-red-600">{overdueLendings.length}</div>
+                        <div className="text-gray-600 text-sm">Overdue Items</div>
+                    </div>
+                    <div className="bg-white rounded-lg shadow-sm p-4 border">
+                        <div className="text-2xl font-bold text-purple-600">{emailNotifications.length}</div>
+                        <div className="text-gray-600 text-sm">Emails Sent</div>
+                    </div>
+                </div>
+            </div>
 
-                {/* Readers Display */}
-                {viewMode === 'grid' ? (
-                    // Grid View
-                    <div className={`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 transition-all duration-1000 transform ${
-                        isVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'
-                    }`} style={{ transitionDelay: '400ms' }}>
-                        {filteredReaders.map((reader, index) => (
-                            <div
-                                key={reader._id}
-                                className="group relative bg-white/10 backdrop-blur-lg border border-white/20 rounded-2xl p-6 hover:bg-white/15 hover:border-white/30 transition-all duration-500 hover:scale-105 hover:shadow-2xl hover:shadow-purple-500/20"
-                            >
+            {loading && (
+                <div className="text-center p-8">
+                    <svg className="animate-spin h-8 w-8 text-blue-600 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    <p className="mt-2 text-gray-600">Loading data...</p>
+                </div>
+            )}
+            {error && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6 text-red-800">
+                    <div className="flex items-center gap-2">
+                        <AlertCircle size={20} />
+                        <span>{error}</span>
+                    </div>
+                </div>
+            )}
+
+            {!loading && !error && filteredLendings.length === 0 && (
+                <div className="text-center p-8 text-gray-500">
+                    <p className="text-lg">No lendings found</p>
+                    <p className="text-sm">Try adjusting your search or filter criteria.</p>
+                </div>
+            )}
+
+            {!loading && !error && viewMode === 'grid' ? (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {filteredLendings.map(lending => {
+                        const isOverdue = !lending.returned && getDaysOverdue(lending.dueDate) > 0;
+                        const daysOverdue = getDaysOverdue(lending.dueDate);
+
+                        return (
+                            <div key={lending._id} className="bg-white rounded-lg shadow-md border p-6 hover:shadow-lg transition-shadow">
                                 <div className="flex items-start justify-between mb-4">
                                     <div className="flex items-center gap-3">
-                                        <div className="p-3 bg-gradient-to-br from-green-500 to-teal-600 rounded-xl">
-                                            <User size={24} className="text-white" />
+                                        <div className="p-2 bg-orange-100 rounded-lg">
+                                            <RefreshCw size={20} className="text-orange-600" />
                                         </div>
                                         <div>
-                                            <h3 className="font-bold text-lg text-white group-hover:text-green-300 transition-colors">
-                                                {reader.name}
-                                            </h3>
-                                            <p className="text-gray-400 text-sm">ID: {reader.id}</p>
+                                            <h3 className="font-bold text-lg text-gray-900">Lending #{lending._id}</h3>
+                                            <p className="text-gray-500 text-sm">{formatDisplayDate(lending.borrowedDate)}</p>
                                         </div>
                                     </div>
-                                    <div className="px-3 py-1 rounded-full text-xs bg-green-500/20 text-green-300 border border-green-500/30">
-                                        Active
+                                    <div className="flex flex-col items-end gap-2">
+                                        <span
+                                            className={`px-3 py-1 rounded-full text-xs font-medium ${
+                                                lending.returned ? 'bg-green-100 text-green-800' : isOverdue ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800'
+                                            }`}
+                                        >
+                                            {lending.returned ? 'Returned' : isOverdue ? `${daysOverdue} days overdue` : 'Active'}
+                                        </span>
+                                        {isOverdue && (
+                                            <div className="flex items-center gap-1 text-xs">
+                                                {lending.emailSent ? (
+                                                    <div className="flex items-center gap-1 text-green-600">
+                                                        <Mail size={12} />
+                                                        <span>Email sent</span>
+                                                    </div>
+                                                ) : (
+                                                    <div className="flex items-center gap-1 text-orange-600">
+                                                        <AlertTriangle size={12} />
+                                                        <span>No email</span>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
-
                                 <div className="space-y-3 mb-4">
-                                    <div className="flex items-center gap-3 text-gray-300">
-                                        <Mail size={16} className="text-gray-400" />
-                                        <span className="text-sm truncate">{reader.email}</span>
+                                    <div className="flex items-center gap-3 text-gray-700">
+                                        <User size={16} className="text-gray-400" />
+                                        <div>
+                                            <span className="font-medium">{lending.readerId.name}</span>
+                                            <span className="text-gray-500 text-sm ml-2">({lending.readerId.id})</span>
+                                        </div>
                                     </div>
-                                    <div className="flex items-center gap-3 text-gray-300">
-                                        <Phone size={16} className="text-gray-400" />
-                                        <span className="text-sm">{reader.phone}</span>
+                                    <div className="flex items-center gap-3 text-gray-700">
+                                        <BookOpen size={16} className="text-gray-400" />
+                                        <div>
+                                            <span className="font-medium">{lending.bookId.title}</span>
+                                            <span className="text-gray-500 text-sm block">by {lending.bookId.author}</span>
+                                        </div>
                                     </div>
-                                    <div className="flex items-start gap-3 text-gray-300">
-                                        <MapPin size={16} className="text-gray-400 mt-0.5 flex-shrink-0" />
-                                        <span className="text-sm leading-relaxed">{reader.address}</span>
+                                    <div className="flex items-center gap-3 text-gray-700">
+                                        <Calendar size={16} className="text-gray-400" />
+                                        <span className="text-sm">
+                                            Due: {formatDisplayDate(lending.dueDate)}
+                                            {lending.returned && (
+                                                <span className="text-green-600 ml-2">(Returned: {formatDisplayDate(lending.returnedDate!)})</span>
+                                            )}
+                                        </span>
                                     </div>
                                 </div>
-
                                 <div className="flex gap-2">
-                                    <button
-                                        onClick={() => setEditingReader(reader)}
-                                        className="flex-1 px-4 py-2 bg-blue-500/20 border border-blue-500/30 text-blue-300 rounded-lg hover:bg-blue-500/30 transition-all duration-300 flex items-center justify-center gap-2"
-                                    >
-                                        <Edit3 size={16} />
-                                        Edit
-                                    </button>
-                                    <button
-                                        onClick={() => handleDeleteReader(reader._id)}
-                                        className="flex-1 px-4 py-2 bg-red-500/20 border border-red-500/30 text-red-300 rounded-lg hover:bg-red-500/30 transition-all duration-300 flex items-center justify-center gap-2"
-                                    >
-                                        <Trash2 size={16} />
-                                        Delete
-                                    </button>
+                                    {!lending.returned && (
+                                        <button
+                                            onClick={() => handleReturnBook(lending._id)}
+                                            className="flex-1 px-4 py-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors flex items-center justify-center gap-2"
+                                        >
+                                            <CheckCircle size={16} />
+                                            Return Book
+                                        </button>
+                                    )}
+                                    {isOverdue && (
+                                        <button
+                                            onClick={() => {
+                                                setSelectedOverdue(lending);
+                                                setShowEmailModal(true);
+                                            }}
+                                            className="px-4 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors flex items-center gap-2"
+                                        >
+                                            <Mail size={16} />
+                                            {lending.emailSent ? 'Resend' : 'Send'} Email
+                                        </button>
+                                    )}
                                 </div>
                             </div>
-                        ))}
-                    </div>
-                ) : (
-                    // Table View
-                    <div className={`transition-all duration-1000 transform ${
-                        isVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'
-                    }`} style={{ transitionDelay: '400ms' }}>
-                        <div className="bg-white/10 backdrop-blur-lg border border-white/20 rounded-2xl overflow-hidden">
-                            <div className="overflow-x-auto">
-                                <table className="w-full">
-                                    <thead>
-                                    <tr className="bg-white/10 border-b border-white/20">
-                                        <th className="p-4 text-left text-gray-300 font-semibold">ID</th>
-                                        <th className="p-4 text-left text-gray-300 font-semibold">Name</th>
-                                        <th className="p-4 text-left text-gray-300 font-semibold">Email</th>
-                                        <th className="p-4 text-left text-gray-300 font-semibold">Phone</th>
-                                        <th className="p-4 text-left text-gray-300 font-semibold">Address</th>
-                                        <th className="p-4 text-left text-gray-300 font-semibold">Actions</th>
+                        );
+                    })}
+                </div>
+            ) : !loading && !error ? (
+                <div className="bg-white rounded-lg shadow-md border overflow-hidden">
+                    <div className="overflow-x-auto">
+                        <table className="w-full">
+                            <thead className="bg-gray-50">
+                            <tr>
+                                <th className="p-4 text-left text-gray-700 font-semibold">ID</th>
+                                <th className="p-4 text-left text-gray-700 font-semibold">Reader</th>
+                                <th className="p-4 text-left text-gray-700 font-semibold">Book</th>
+                                <th className="p-4 text-left text-gray-700 font-semibold">Borrowed</th>
+                                <th className="p-4 text-left text-gray-700 font-semibold">Due Date</th>
+                                <th className="p-4 text-left text-gray-700 font-semibold">Status</th>
+                                <th className="p-4 text-left text-gray-700 font-semibold">Actions</th>
+                            </tr>
+                            </thead>
+                            <tbody>
+                            {filteredLendings.map(lending => {
+                                const isOverdue = !lending.returned && getDaysOverdue(lending.dueDate) > 0;
+                                const daysOverdue = getDaysOverdue(lending.dueDate);
+                                return (
+                                    <tr key={lending._id} className="border-t hover:bg-gray-50 transition-colors">
+                                        <td className="p-4 text-gray-900">#{lending._id}</td>
+                                        <td className="p-4">
+                                            <div>
+                                                <div className="text-gray-900 font-medium">{lending.readerId.name}</div>
+                                                <div className="text-gray-500 text-sm">{lending.readerId.id}</div>
+                                            </div>
+                                        </td>
+                                        <td className="p-4">
+                                            <div>
+                                                <div className="text-gray-900 font-medium">{lending.bookId.title}</div>
+                                                <div className="text-gray-500 text-sm">by {lending.bookId.author}</div>
+                                            </div>
+                                        </td>
+                                        <td className="p-4 text-gray-700">{formatDisplayDate(lending.borrowedDate)}</td>
+                                        <td className="p-4 text-gray-700">{formatDisplayDate(lending.dueDate)}</td>
+                                        <td className="p-4">
+                                            <div className="flex flex-col gap-1">
+                                                    <span
+                                                        className={`px-3 py-1 rounded-full text-xs font-medium ${
+                                                            lending.returned ? 'bg-green-100 text-green-800' : isOverdue ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800'
+                                                        }`}
+                                                    >
+                                                        {lending.returned ? 'Returned' : isOverdue ? `${daysOverdue}d overdue` : 'Active'}
+                                                    </span>
+                                                {isOverdue && (
+                                                    <span className={`text-xs flex items-center gap-1 ${lending.emailSent ? 'text-green-600' : 'text-orange-600'}`}>
+                                                            <Mail size={10} />
+                                                        {lending.emailSent ? 'Email sent' : 'No email'}
+                                                        </span>
+                                                )}
+                                            </div>
+                                        </td>
+                                        <td className="p-4">
+                                            <div className="flex gap-2">
+                                                {!lending.returned && (
+                                                    <button
+                                                        onClick={() => handleReturnBook(lending._id)}
+                                                        className="p-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors"
+                                                        title="Return Book"
+                                                    >
+                                                        <CheckCircle size={16} />
+                                                    </button>
+                                                )}
+                                                {isOverdue && (
+                                                    <button
+                                                        onClick={() => {
+                                                            setSelectedOverdue(lending);
+                                                            setShowEmailModal(true);
+                                                        }}
+                                                        className="p-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors"
+                                                        title="Send Overdue Email"
+                                                    >
+                                                        <Mail size={16} />
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </td>
                                     </tr>
-                                    </thead>
-                                    <tbody>
-                                    {filteredReaders.map((reader) => (
-                                        <tr key={reader._id} className="border-b border-white/10 hover:bg-white/5 transition-colors duration-300">
-                                            <td className="p-4 text-white">{reader.id}</td>
-                                            <td className="p-4 text-white font-medium">{reader.name}</td>
-                                            <td className="p-4 text-gray-300">{reader.email}</td>
-                                            <td className="p-4 text-gray-300">{reader.phone}</td>
-                                            <td className="p-4 text-gray-300 max-w-xs truncate">{reader.address}</td>
-                                            <td className="p-4">
-                                                <div className="flex gap-2">
-                                                    <button
-                                                        onClick={() => setEditingReader(reader)}
-                                                        className="p-2 bg-blue-500/20 border border-blue-500/30 text-blue-300 rounded-lg hover:bg-blue-500/30 transition-all duration-300"
-                                                    >
-                                                        <Edit3 size={16} />
-                                                    </button>
-                                                    <button
-                                                        onClick={() => handleDeleteReader(reader._id)}
-                                                        className="p-2 bg-red-500/20 border border-red-500/30 text-red-300 rounded-lg hover:bg-red-500/30 transition-all duration-300"
-                                                    >
-                                                        <Trash2 size={16} />
-                                                    </button>
+                                );
+                            })}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            ) : null}
+        </div>
+    );
+
+    const OverduePage = () => (
+        <div>
+            <div className="mb-6">
+                <div className="flex items-center gap-3 mb-4">
+                    <AlertTriangle className="text-red-600" size={24} />
+                    <h2 className="text-2xl font-bold text-gray-900">Overdue Books Management</h2>
+                </div>
+                <p className="text-gray-600">Monitor and manage overdue books with automated email notifications</p>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+                <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                    <div className="text-2xl font-bold text-red-600">{overdueLendings.length}</div>
+                    <div className="text-red-700 text-sm">Total Overdue</div>
+                </div>
+                <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
+                    <div className="text-2xl font-bold text-orange-600">{overdueLendings.filter(l => !l.emailSent).length}</div>
+                    <div className="text-orange-700 text-sm">No Email Sent</div>
+                </div>
+                <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                    <div className="text-2xl font-bold text-green-600">{overdueLendings.filter(l => l.emailSent).length}</div>
+                    <div className="text-green-700 text-sm">Email Notifications Sent</div>
+                </div>
+            </div>
+            <div className="bg-white rounded-lg shadow-md border">
+                <div className="p-6 border-b">
+                    <h3 className="text-lg font-semibold text-gray-900">Overdue Books</h3>
+                </div>
+                <div className="overflow-x-auto">
+                    <table className="w-full">
+                        <thead className="bg-gray-50">
+                        <tr>
+                            <th className="p-4 text-left text-gray-700 font-semibold">Reader</th>
+                            <th className="p-4 text-left text-gray-700 font-semibold">Book</th>
+                            <th className="p-4 text-left text-gray-700 font-semibold">Due Date</th>
+                            <th className="p-4 text-left text-gray-700 font-semibold">Days Overdue</th>
+                            <th className="p-4 text-left text-gray-700 font-semibold">Email Status</th>
+                            <th className="p-4 text-left text-gray-700 font-semibold">Actions</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        {overdueLendings.map(lending => {
+                            const daysOverdue = getDaysOverdue(lending.dueDate);
+                            return (
+                                <tr key={lending._id} className="border-t hover:bg-gray-50 transition-colors">
+                                    <td className="p-4">
+                                        <div>
+                                            <div className="font-medium text-gray-900">{lending.readerId.name}</div>
+                                            <div className="text-gray-500 text-sm">{lending.readerId.email}</div>
+                                            <div className="text-gray-500 text-sm">{lending.readerId.phone}</div>
+                                        </div>
+                                    </td>
+                                    <td className="p-4">
+                                        <div>
+                                            <div className="font-medium text-gray-900">{lending.bookId.title}</div>
+                                            <div className="text-gray-500 text-sm">by {lending.bookId.author}</div>
+                                        </div>
+                                    </td>
+                                    <td className="p-4 text-gray-700">{formatDisplayDate(lending.dueDate)}</td>
+                                    <td className="p-4">
+                                            <span
+                                                className={`px-3 py-1 rounded-full text-sm font-medium ${
+                                                    daysOverdue > 30 ? 'bg-red-100 text-red-800' : daysOverdue > 14 ? 'bg-orange-100 text-orange-800' : 'bg-yellow-100 text-yellow-800'
+                                                }`}
+                                            >
+                                                {daysOverdue} days
+                                            </span>
+                                    </td>
+                                    <td className="p-4">
+                                        <div className="flex flex-col gap-1">
+                                            {lending.emailSent ? (
+                                                <div className="flex items-center gap-2 text-green-600 text-sm">
+                                                    <CheckCircle size={16} />
+                                                    <span>Sent on {formatDisplayDate(lending.lastEmailDate!)}</span>
                                                 </div>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                    </tbody>
-                                </table>
+                                            ) : (
+                                                <div className="flex items-center gap-2 text-red-600 text-sm">
+                                                    <AlertCircle size={16} />
+                                                    <span>No email sent</span>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </td>
+                                    <td className="p-4">
+                                        <div className="flex gap-2">
+                                            <button
+                                                onClick={() => {
+                                                    setSelectedOverdue(lending);
+                                                    setShowEmailModal(true);
+                                                }}
+                                                className="px-3 py-1 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors flex items-center gap-2 text-sm"
+                                            >
+                                                <Mail size={14} />
+                                                {lending.emailSent ? 'Resend' : 'Send'} Email
+                                            </button>
+                                            <button
+                                                onClick={() => handleReturnBook(lending._id)}
+                                                className="px-3 py-1 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors flex items-center gap-2 text-sm"
+                                            >
+                                                <CheckCircle size={14} />
+                                                Return
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            );
+                        })}
+                        </tbody>
+                    </table>
+                    {overdueLendings.length === 0 && (
+                        <div className="p-8 text-center text-gray-500">
+                            <CheckCircle size={48} className="mx-auto mb-3 text-green-400" />
+                            <p className="text-lg">No overdue books!</p>
+                            <p className="text-sm">All books are returned on time.</p>
+                        </div>
+                    )}
+                </div>
+            </div>
+            <div className="bg-white rounded-lg shadow-md border mt-8">
+                <div className="p-6 border-b">
+                    <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                        <Bell className="text-blue-600" />
+                        Recent Email Notifications
+                    </h3>
+                </div>
+                <div className="max-h-96 overflow-y-auto">
+                    {emailNotifications.slice(-10).reverse().map(notification => (
+                        <div key={notification.id} className="p-4 border-b last:border-b-0 hover:bg-gray-50">
+                            <div className="flex items-start justify-between">
+                                <div className="flex-1">
+                                    <div className="flex items-center gap-2 mb-1">
+                                        <Mail size={16} className="text-blue-600" />
+                                        <span className="font-medium text-gray-900">{notification.readerName}</span>
+                                        <span className="text-gray-500 text-sm">({notification.readerEmail})</span>
+                                    </div>
+                                    <div className="text-gray-700 text-sm mb-1">
+                                        Book: <strong>{notification.bookTitle}</strong>
+                                    </div>
+                                    <div className="text-gray-500 text-xs">
+                                        Due: {formatDisplayDate(notification.dueDate)} • {notification.daysOverdue} days overdue
+                                    </div>
+                                </div>
+                                <div className="text-right text-xs text-gray-500">{formatDisplayDate(notification.sentDate.split('T')[0])}</div>
                             </div>
                         </div>
-                    </div>
-                )}
+                    ))}
+                    {emailNotifications.length === 0 && (
+                        <div className="p-8 text-center text-gray-500">
+                            <Mail size={48} className="mx-auto mb-3 text-gray-400" />
+                            <p>No email notifications sent yet</p>
+                        </div>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
 
-                {/* Add Reader Modal */}
+    return (
+        <div className="min-h-screen bg-gray-50">
+            <div className="container mx-auto px-6 py-8">
+                <div className="text-center mb-8">
+                    <div className="inline-flex items-center gap-4 mb-6 px-6 py-3 bg-white rounded-full shadow-sm border">
+                        <div className="flex items-center gap-2 text-blue-600">
+                            <Calendar size={18} />
+                            <span className="text-sm font-medium">{formatDate(currentTime)}</span>
+                        </div>
+                        <div className="w-px h-6 bg-gray-300"></div>
+                        <div className="flex items-center gap-2 text-green-600">
+                            <Clock size={18} />
+                            <span className="text-sm font-mono font-bold">{formatTime(currentTime)}</span>
+                        </div>
+                    </div>
+                    <div className="flex items-center justify-center gap-4 mb-4">
+                        <div className="p-3 bg-orange-600 rounded-lg">
+                            <RefreshCw size={32} className="text-white" />
+                        </div>
+                        <h1 className="text-4xl font-bold text-gray-900">Lendings Management</h1>
+                    </div>
+                    <p className="text-gray-600 text-lg">Track book lending, returns, and overdue items</p>
+                </div>
+                <div className="flex justify-center mb-8">
+                    <div className="flex bg-white rounded-lg border shadow-sm p-1">
+                        <button
+                            onClick={() => setCurrentPage('lendings')}
+                            className={`px-6 py-2 rounded-md transition-colors flex items-center gap-2 ${
+                                currentPage === 'lendings' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:text-gray-900'
+                            }`}
+                        >
+                            <RefreshCw size={18} />
+                            Lendings
+                        </button>
+                        <button
+                            onClick={() => setCurrentPage('overdue')}
+                            className={`px-6 py-2 rounded-md transition-colors flex items-center gap-2 relative ${
+                                currentPage === 'overdue' ? 'bg-red-600 text-white' : 'text-gray-600 hover:text-gray-900'
+                            }`}
+                        >
+                            <AlertTriangle size={18} />
+                            Overdue Books
+                            {overdueLendings.length > 0 && (
+                                <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center">
+                                    {overdueLendings.length}
+                                </span>
+                            )}
+                        </button>
+                    </div>
+                </div>
+                {currentPage === 'lendings' ? <LendingsPageContent /> : <OverduePage />}
                 {showAddForm && (
-                    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-                        <div className="bg-white/10 backdrop-blur-lg border border-white/20 rounded-2xl p-8 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-                            <div className="flex items-center justify-between mb-6">
-                                <h3 className="text-2xl font-bold text-white flex items-center gap-3">
-                                    <Plus className="text-green-400" />
-                                    Add New Reader
-                                </h3>
-                                <button
-                                    onClick={() => setShowAddForm(false)}
-                                    className="p-2 hover:bg-white/10 rounded-full transition-colors duration-300"
-                                >
-                                    <X size={24} className="text-gray-400" />
-                                </button>
-                            </div>
-
-                            <div className="space-y-4">
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="block text-gray-300 mb-2">Reader ID</label>
-                                        <input
-                                            type="text"
-                                            value={newReader.id}
-                                            onChange={(e) => setNewReader({ ...newReader, id: e.target.value })}
-                                            className="w-full p-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-300"
-                                            placeholder="Enter reader ID"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-gray-300 mb-2">Full Name</label>
-                                        <input
-                                            type="text"
-                                            value={newReader.name}
-                                            onChange={(e) => setNewReader({ ...newReader, name: e.target.value })}
-                                            className="w-full p-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-300"
-                                            placeholder="Enter full name"
-                                        />
-                                    </div>
-                                </div>
-
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="block text-gray-300 mb-2">Email Address</label>
-                                        <input
-                                            type="email"
-                                            value={newReader.email}
-                                            onChange={(e) => setNewReader({ ...newReader, email: e.target.value })}
-                                            className="w-full p-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-300"
-                                            placeholder="Enter email address"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-gray-300 mb-2">Phone Number</label>
-                                        <input
-                                            type="text"
-                                            value={newReader.phone}
-                                            onChange={(e) => setNewReader({ ...newReader, phone: e.target.value })}
-                                            className="w-full p-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-300"
-                                            placeholder="Enter phone number"
-                                        />
-                                    </div>
-                                </div>
-
-                                <div>
-                                    <label className="block text-gray-300 mb-2">Address</label>
-                                    <textarea
-                                        value={newReader.address}
-                                        onChange={(e) => setNewReader({ ...newReader, address: e.target.value })}
-                                        rows={3}
-                                        className="w-full p-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-300 resize-none"
-                                        placeholder="Enter full address"
-                                    />
-                                </div>
-
-                                <div className="flex gap-4 pt-4">
+                    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                        <div className="bg-white rounded-lg w-full max-w-md max-h-[90vh] overflow-y-auto">
+                            <div className="p-6 border-b">
+                                <div className="flex items-center justify-between">
+                                    <h3 className="text-xl font-bold text-gray-900 flex items-center gap-3">
+                                        <Plus className="text-blue-600" />
+                                        Lend Book
+                                    </h3>
                                     <button
-                                        type="button"
                                         onClick={() => setShowAddForm(false)}
-                                        className="flex-1 px-6 py-3 bg-white/10 border border-white/20 text-gray-300 rounded-lg hover:bg-white/20 transition-all duration-300"
+                                        className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+                                    >
+                                        <X size={20} className="text-gray-400" />
+                                    </button>
+                                </div>
+                            </div>
+                            <div className="p-6">
+                                <div className="space-y-4">
+                                    <div>
+                                        <label className="block text-gray-700 font-medium mb-2">Select Reader</label>
+                                        <select
+                                            value={newLending.readerId}
+                                            onChange={(e) => setNewLending({ ...newLending, readerId: e.target.value })}
+                                            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                        >
+                                            <option value="">Choose a reader...</option>
+                                            {readers.map(reader => (
+                                                <option key={reader._id} value={reader._id}>
+                                                    {reader.name} (ID: {reader.id})
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-gray-700 font-medium mb-2">Select Book</label>
+                                        <select
+                                            value={newLending.bookId}
+                                            onChange={(e) => setNewLending({ ...newLending, bookId: e.target.value })}
+                                            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                        >
+                                            <option value="">Choose a book...</option>
+                                            {books.filter(book => book.quantity > 0).map(book => (
+                                                <option key={book._id} value={book._id}>
+                                                    {book.title} by {book.author}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="p-6 border-t bg-gray-50">
+                                <div className="flex gap-4">
+                                    <button
+                                        onClick={() => setShowAddForm(false)}
+                                        className="flex-1 px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
                                     >
                                         Cancel
                                     </button>
                                     <button
-                                        type="button"
-                                        onClick={handleAddReader}
-                                        className="flex-1 px-6 py-3 bg-gradient-to-r from-green-500 to-teal-600 text-white rounded-lg hover:from-green-600 hover:to-teal-700 transition-all duration-300 flex items-center justify-center gap-2"
+                                        onClick={handleLendBook}
+                                        disabled={!newLending.readerId || !newLending.bookId || loading}
+                                        className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                                     >
-                                        <Save size={18} />
-                                        Add Reader
+                                        {loading ? (
+                                            <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                            </svg>
+                                        ) : (
+                                            <Save size={18} />
+                                        )}
+                                        {loading ? 'Lending...' : 'Lend Book'}
                                     </button>
                                 </div>
                             </div>
                         </div>
                     </div>
                 )}
-
-                {/* Edit Reader Modal */}
-                {editingReader && (
-                    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-                        <div className="bg-white/10 backdrop-blur-lg border border-white/20 rounded-2xl p-8 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-                            <div className="flex items-center justify-between mb-6">
-                                <h3 className="text-2xl font-bold text-white flex items-center gap-3">
-                                    <Edit3 className="text-blue-400" />
-                                    Edit Reader
-                                </h3>
-                                <button
-                                    onClick={() => setEditingReader(null)}
-                                    className="p-2 hover:bg-white/10 rounded-full transition-colors duration-300"
-                                >
-                                    <X size={24} className="text-gray-400" />
-                                </button>
-                            </div>
-
-                            <div className="space-y-4">
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="block text-gray-300 mb-2">Reader ID</label>
-                                        <input
-                                            type="text"
-                                            value={editingReader.id}
-                                            onChange={(e) => setEditingReader({ ...editingReader, id: e.target.value })}
-                                            className="w-full p-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-300"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-gray-300 mb-2">Full Name</label>
-                                        <input
-                                            type="text"
-                                            value={editingReader.name}
-                                            onChange={(e) => setEditingReader({ ...editingReader, name: e.target.value })}
-                                            className="w-full p-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-300"
-                                        />
-                                    </div>
-                                </div>
-
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="block text-gray-300 mb-2">Email Address</label>
-                                        <input
-                                            type="email"
-                                            value={editingReader.email}
-                                            onChange={(e) => setEditingReader({ ...editingReader, email: e.target.value })}
-                                            className="w-full p-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-300"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-gray-300 mb-2">Phone Number</label>
-                                        <input
-                                            type="text"
-                                            value={editingReader.phone}
-                                            onChange={(e) => setEditingReader({ ...editingReader, phone: e.target.value })}
-                                            className="w-full p-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-300"
-                                        />
-                                    </div>
-                                </div>
-
-                                <div>
-                                    <label className="block text-gray-300 mb-2">Address</label>
-                                    <textarea
-                                        value={editingReader.address}
-                                        onChange={(e) => setEditingReader({ ...editingReader, address: e.target.value })}
-                                        rows={3}
-                                        className="w-full p-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-300 resize-none"
-                                    />
-                                </div>
-
-                                <div className="flex gap-4 pt-4">
+                {showEmailModal && selectedOverdue && (
+                    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                        <div className="bg-white rounded-lg w-full max-w-md">
+                            <div className="p-6 border-b">
+                                <div className="flex items-center justify-between">
+                                    <h3 className="text-xl font-bold text-gray-900 flex items-center gap-3">
+                                        <Mail className="text-red-600" />
+                                        Send Overdue Notice
+                                    </h3>
                                     <button
-                                        type="button"
-                                        onClick={() => setEditingReader(null)}
-                                        className="flex-1 px-6 py-3 bg-white/10 border border-white/20 text-gray-300 rounded-lg hover:bg-white/20 transition-all duration-300"
+                                        onClick={() => {
+                                            setShowEmailModal(false);
+                                            setSelectedOverdue(null);
+                                        }}
+                                        className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+                                    >
+                                        <X size={20} className="text-gray-400" />
+                                    </button>
+                                </div>
+                            </div>
+                            <div className="p-6">
+                                <div className="space-y-4">
+                                    <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                                        <div className="text-red-800">
+                                            <p className="font-medium mb-2">Email will be sent to:</p>
+                                            <p><strong>{selectedOverdue.readerId.name}</strong></p>
+                                            <p className="text-sm">{selectedOverdue.readerId.email}</p>
+                                        </div>
+                                    </div>
+                                    <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                                        <p className="font-medium text-gray-900 mb-2">Book Details:</p>
+                                        <p><strong>{selectedOverdue.bookId.title}</strong></p>
+                                        <p className="text-sm text-gray-600">by {selectedOverdue.bookId.author}</p>
+                                        <p className="text-sm text-red-600 mt-2">
+                                            <strong>{getDaysOverdue(selectedOverdue.dueDate)} days overdue</strong>
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="p-6 border-t bg-gray-50">
+                                <div className="flex gap-4">
+                                    <button
+                                        onClick={() => {
+                                            setShowEmailModal(false);
+                                            setSelectedOverdue(null);
+                                        }}
+                                        className="flex-1 px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
                                     >
                                         Cancel
                                     </button>
                                     <button
-                                        type="button"
-                                        onClick={handleEditReader}
-                                        className="flex-1 px-6 py-3 bg-gradient-to-r from-blue-500 to-purple-600 text-white rounded-lg hover:from-blue-600 hover:to-purple-700 transition-all duration-300 flex items-center justify-center gap-2"
+                                        onClick={() => handleManualEmailSend(selectedOverdue)}
+                                        className="flex-1 px-6 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors flex items-center justify-center gap-2"
                                     >
-                                        <Save size={18} />
-                                        Save Changes
+                                        <Mail size={18} />
+                                        Send Email
                                     </button>
                                 </div>
                             </div>
@@ -491,5 +911,5 @@ const ReadersPage: React.FC = () => {
     );
 };
 
-export default ReadersPage;
-
+export default LendingsPage;
+export default LendingsPage;

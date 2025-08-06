@@ -7,7 +7,7 @@ import { APIError } from '../errors/APIError';
 const createAccessToken = (userId: string) => {
     return jwt.sign(
         { userId },
-        process.env.ACCESS_TOKEN_SECRET!,
+        process.env.ACCESS_TOKEN_SECRET || 'default_access_token_secret_2024',
         { expiresIn: '70d' },
     );
 };
@@ -15,7 +15,7 @@ const createAccessToken = (userId: string) => {
 const createRefreshToken = (userId: string) => {
     return jwt.sign(
         { userId },
-        process.env.REFRESH_TOKEN_SECRET!,
+        process.env.REFRESH_TOKEN_SECRET || 'default_refresh_token_secret_2024',
         { expiresIn: '70d' },
     );
 };
@@ -75,10 +75,9 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
             _id: user._id,
             name: user.name,
             email: user.email,
-            accessToken,
         };
 
-        res.status(200).json({ user: userWithoutPassword });
+        res.status(200).json({ user: userWithoutPassword, accessToken });
     } catch (err) {
         next(err);
     }
@@ -102,7 +101,7 @@ export const refreshToken = async (req: Request, res: Response, next: NextFuncti
 
         jwt.verify(
             token,
-            process.env.REFRESH_TOKEN_SECRET!,
+            process.env.REFRESH_TOKEN_SECRET || 'default_refresh_token_secret_2024',
             async (err: Error | null, decoded: string | JwtPayload | undefined) => {
                 if (err) {
                     if (err instanceof TokenExpiredError) return next(new APIError(401, 'Refresh token expired'));

@@ -1,15 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Users, Search, Plus, Edit3, Trash2, X, Save, Calendar, Clock, Grid, List, Mail, Phone, MapPin, User } from 'lucide-react';
-
-// Reader interface
-interface Reader {
-    _id: string;
-    id: string;
-    name: string;
-    email: string;
-    phone: string;
-    address: string;
-}
+import { getReaders, addReader, updateReader, deleteReader } from '../service/readerService';
+import type { Reader } from '@/types/Readers';
 
 const ReadersPage: React.FC = () => {
     const [readers, setReaders] = useState<Reader[]>([]);
@@ -23,29 +15,30 @@ const ReadersPage: React.FC = () => {
     const [editingReader, setEditingReader] = useState<Reader | null>(null);
     const [search, setSearch] = useState('');
     const [currentTime, setCurrentTime] = useState(new Date());
-    const [isVisible, setIsVisible] = useState(false);
     const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
     const [showAddForm, setShowAddForm] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const [token, setToken] = useState<string | null>(localStorage.getItem('token'));
 
-    // Fetch readers from API
     useEffect(() => {
         const fetchReaders = async () => {
             try {
-                const response = await fetch('http://localhost:3001/api/readers');
-                if (!response.ok) throw new Error('Failed to fetch readers');
-                const data = await response.json();
-                setReaders(data);
-            } catch (error) {
-                console.error('Error fetching readers:', error);
+                const fetchedReaders = await getReaders();
+                setReaders(fetchedReaders);
+                setError(null);
+            } catch (err: any) {
+                setError(err.response?.data?.message || 'Failed to fetch readers');
+                console.error(err);
             }
         };
 
-        fetchReaders();
-        const timer = setInterval(() => setCurrentTime(new Date()), 1000);
-        setTimeout(() => setIsVisible(true), 100);
+        if (token) {
+            fetchReaders();
+        }
 
+        const timer = setInterval(() => setCurrentTime(new Date()), 1000);
         return () => clearInterval(timer);
-    }, []);
+    }, [token]);
 
     const formatTime = (date: Date) => {
         return date.toLocaleTimeString('en-US', {
@@ -53,6 +46,7 @@ const ReadersPage: React.FC = () => {
             hour: '2-digit',
             minute: '2-digit',
             second: '2-digit',
+            timeZone: 'Asia/Colombo',
         });
     };
 
@@ -62,52 +56,51 @@ const ReadersPage: React.FC = () => {
             year: 'numeric',
             month: 'long',
             day: 'numeric',
+            timeZone: 'Asia/Colombo',
         });
     };
 
     const handleAddReader = async () => {
         try {
-            const response = await fetch('http://localhost:3001/api/readers', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(newReader),
-            });
-            if (!response.ok) throw new Error('Failed to add reader');
-            const addedReader = await response.json();
-            setReaders([...readers, addedReader]);
+            if (!newReader.id || !newReader.name || !newReader.email || !newReader.phone || !newReader.address) {
+                setError('All fields are required');
+                return;
+            }
+            const readerWithId = await addReader(newReader);
+            setReaders([...readers, readerWithId]);
             setNewReader({ id: '', name: '', email: '', phone: '', address: '' });
             setShowAddForm(false);
-        } catch (error) {
-            console.error('Error adding reader:', error);
+            setError(null);
+        } catch (err: any) {
+            setError(err.response?.data?.message || 'Failed to add reader');
+            console.error(err);
         }
     };
 
     const handleEditReader = async () => {
-        if (!editingReader) return;
+        if (!editingReader || !editingReader._id || !editingReader.id || !editingReader.name || !editingReader.email || !editingReader.phone || !editingReader.address) {
+            setError('All reader fields are required');
+            return;
+        }
         try {
-            const response = await fetch(`http://localhost:3001/api/readers/${editingReader._id}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(editingReader),
-            });
-            if (!response.ok) throw new Error('Failed to update reader');
-            const updatedReader = await response.json();
-            setReaders(readers.map(reader => (reader._id === updatedReader._id ? updatedReader : reader)));
+            const updatedReader = await updateReader(editingReader._id, editingReader);
+            setReaders(readers.map(reader => (reader._id === editingReader._id ? updatedReader : reader)));
             setEditingReader(null);
-        } catch (error) {
-            console.error('Error updating reader:', error);
+            setError(null);
+        } catch (err: any) {
+            setError(err.response?.data?.message || 'Failed to update reader');
+            console.error(err);
         }
     };
 
     const handleDeleteReader = async (id: string) => {
         try {
-            const response = await fetch(`http://localhost:3001/api/readers/${id}`, {
-                method: 'DELETE',
-            });
-            if (!response.ok) throw new Error('Failed to delete reader');
+            await deleteReader(id);
             setReaders(readers.filter(reader => reader._id !== id));
-        } catch (error) {
-            console.error('Error deleting reader:', error);
+            setError(null);
+        } catch (err: any) {
+            setError(err.response?.data?.message || 'Failed to delete reader');
+            console.error(err);
         }
     };
 
@@ -118,41 +111,49 @@ const ReadersPage: React.FC = () => {
             reader.phone.toLowerCase().includes(search.toLowerCase())
     );
 
-    return (
-        <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 text-white relative overflow-hidden">
-            {/* Animated background elements */}
-            <div className="absolute inset-0 overflow-hidden">
-                <div className="absolute -top-40 -right-40 w-80 h-80 bg-purple-500 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-pulse"></div>
-                <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-pink-500 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-pulse"></div>
-                <div className="absolute top-40 left-1/2 w-60 h-60 bg-blue-500 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-pulse"></div>
+    if (!token) {
+        return (
+            <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+                <div className="text-center">
+                    <h2 className="text-2xl font-bold text-gray-900 mb-4">Please Login</h2>
+                    <p className="text-gray-600">You need to be logged in to access the Readers Management page.</p>
+                </div>
             </div>
+        );
+    }
 
-            <div className="relative z-10 container mx-auto px-6 py-8">
+    return (
+        <div className="min-h-screen bg-gray-50">
+            <div className="container mx-auto px-6 py-8">
+                {error && (
+                    <div className="mb-6 p-4 bg-red-100 text-red-700 rounded-lg">
+                        {error}
+                    </div>
+                )}
                 {/* Header */}
-                <div className={`text-center mb-8 transition-all duration-1000 transform ${isVisible ? 'translate-y-0 opacity-100' : '-translate-y-10 opacity-0'}`}>
-                    <div className="inline-flex items-center gap-4 mb-6 px-6 py-3 bg-white/10 backdrop-blur-lg rounded-full border border-white/20">
-                        <div className="flex items-center gap-2 text-blue-300">
+                <div className="text-center mb-8">
+                    <div className="inline-flex items-center gap-4 mb-6 px-6 py-3 bg-white rounded-full shadow-sm border">
+                        <div className="flex items-center gap-2 text-blue-600">
                             <Calendar size={18} />
                             <span className="text-sm font-medium">{formatDate(currentTime)}</span>
                         </div>
-                        <div className="w-px h-6 bg-white/30"></div>
-                        <div className="flex items-center gap-2 text-emerald-300">
+                        <div className="w-px h-6 bg-gray-300"></div>
+                        <div className="flex items-center gap-2 text-green-600">
                             <Clock size={18} />
                             <span className="text-sm font-mono font-bold">{formatTime(currentTime)}</span>
                         </div>
                     </div>
-
                     <div className="flex items-center justify-center gap-4 mb-4">
-                        <Users size={48} className="text-blue-400" />
-                        <h1 className="text-5xl font-bold bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400 bg-clip-text text-transparent">
-                            Readers Management
-                        </h1>
+                        <div className="p-3 bg-blue-600 rounded-lg">
+                            <Users size={32} className="text-white" />
+                        </div>
+                        <h1 className="text-4xl font-bold text-gray-900">Readers Management</h1>
                     </div>
-                    <p className="text-gray-400 text-lg">Manage your library members and their information</p>
+                    <p className="text-gray-600 text-lg">Manage your library members and their information</p>
                 </div>
 
                 {/* Controls */}
-                <div className={`mb-8 transition-all duration-1000 transform ${isVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'}`} style={{ transitionDelay: '200ms' }}>
+                <div className="mb-8">
                     <div className="flex flex-col md:flex-row gap-4 items-center justify-between mb-6">
                         <div className="relative flex-1 max-w-md">
                             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
@@ -161,73 +162,91 @@ const ReadersPage: React.FC = () => {
                                 placeholder="Search readers, emails, phones..."
                                 value={search}
                                 onChange={e => setSearch(e.target.value)}
-                                className="w-full pl-10 pr-4 py-3 bg-white/10 backdrop-blur-lg border border-white/20 rounded-full text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-300"
+                                className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                             />
                         </div>
                         <div className="flex gap-3">
                             <button
                                 onClick={() => setViewMode(viewMode === 'grid' ? 'table' : 'grid')}
-                                className="px-4 py-2 bg-white/10 backdrop-blur-lg border border-white/20 rounded-full text-white hover:bg-white/20 transition-all duration-300 flex items-center gap-2"
+                                className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors flex items-center gap-2"
                             >
                                 {viewMode === 'grid' ? <List size={18} /> : <Grid size={18} />}
                                 {viewMode === 'grid' ? 'Table' : 'Grid'}
                             </button>
                             <button
                                 onClick={() => setShowAddForm(true)}
-                                className="px-6 py-2 bg-gradient-to-r from-blue-500 to-purple-600 rounded-full text-white hover:from-blue-600 hover:to-purple-700 transition-all duration-300 flex items-center gap-2 shadow-lg hover:shadow-xl transform hover:scale-105"
+                                className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
                             >
                                 <Plus size={18} />
                                 Add Reader
                             </button>
                         </div>
                     </div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                        <div className="bg-white rounded-lg shadow-sm p-4 border">
+                            <div className="text-2xl font-bold text-blue-600">{readers.length}</div>
+                            <div className="text-gray-600 text-sm">Total Readers</div>
+                        </div>
+                        <div className="bg-white rounded-lg shadow-sm p-4 border">
+                            <div className="text-2xl font-bold text-green-600">{readers.length}</div>
+                            <div className="text-gray-600 text-sm">Active Members</div>
+                        </div>
+                        <div className="bg-white rounded-lg shadow-sm p-4 border">
+                            <div className="text-2xl font-bold text-orange-600">
+                                {filteredReaders.length}
+                            </div>
+                            <div className="text-gray-600 text-sm">Search Results</div>
+                        </div>
+                    </div>
                 </div>
 
                 {/* Readers Display */}
                 {viewMode === 'grid' ? (
-                    <div className={`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 transition-all duration-1000 transform ${isVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'}`} style={{ transitionDelay: '400ms' }}>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                         {filteredReaders.map(reader => (
-                            <div
-                                key={reader._id}
-                                className="group relative bg-white/10 backdrop-blur-lg border border-white/20 rounded-2xl p-6 hover:bg-white/15 hover:border-white/30 transition-all duration-500 hover:scale-105 hover:shadow-2xl hover:shadow-purple-500/20"
-                            >
+                            <div key={reader._id} className="bg-white rounded-lg shadow-md border p-6 hover:shadow-lg transition-shadow">
                                 <div className="flex items-start justify-between mb-4">
                                     <div className="flex items-center gap-3">
-                                        <div className="p-3 bg-gradient-to-br from-green-500 to-teal-600 rounded-xl">
-                                            <User size={24} className="text-white" />
+                                        <div className="p-2 bg-green-100 rounded-lg">
+                                            <User size={20} className="text-green-600" />
                                         </div>
                                         <div>
-                                            <h3 className="font-bold text-lg text-white group-hover:text-green-300 transition-colors">{reader.name}</h3>
-                                            <p className="text-gray-400 text-sm">ID: {reader.id}</p>
+                                            <h3 className="font-bold text-lg text-gray-900">{reader.name}</h3>
+                                            <p className="text-gray-500 text-sm">ID: {reader.id}</p>
                                         </div>
                                     </div>
-                                    <div className="px-3 py-1 rounded-full text-xs bg-green-500/20 text-green-300 border border-green-500/30">Active</div>
+                                    <span className="px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                        Active
+                                    </span>
                                 </div>
-                                <div className="space-y-3 mb-4">
-                                    <div className="flex items-center gap-3 text-gray-300">
+                                <div className="space-y-2 mb-4">
+                                    <div className="flex items-center gap-3 text-gray-700">
                                         <Mail size={16} className="text-gray-400" />
                                         <span className="text-sm truncate">{reader.email}</span>
                                     </div>
-                                    <div className="flex items-center gap-3 text-gray-300">
+                                    <div className="flex items-center gap-3 text-gray-700">
                                         <Phone size={16} className="text-gray-400" />
                                         <span className="text-sm">{reader.phone}</span>
                                     </div>
-                                    <div className="flex items-start gap-3 text-gray-300">
+                                    <div className="flex items-start gap-3 text-gray-700">
                                         <MapPin size={16} className="text-gray-400 mt-0.5 flex-shrink-0" />
                                         <span className="text-sm leading-relaxed">{reader.address}</span>
                                     </div>
                                 </div>
                                 <div className="flex gap-2">
                                     <button
-                                        onClick={() => setEditingReader(reader)}
-                                        className="flex-1 px-4 py-2 bg-blue-500/20 border border-blue-500/30 text-blue-300 rounded-lg hover:bg-blue-500/30 transition-all duration-300 flex items-center justify-center gap-2"
+                                        onClick={() => {
+                                            console.log('Editing reader:', reader); // Debug
+                                            setEditingReader(reader);
+                                        }}
+                                        className="flex-1 px-4 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors flex items-center justify-center gap-2"
                                     >
                                         <Edit3 size={16} />
                                         Edit
                                     </button>
                                     <button
                                         onClick={() => handleDeleteReader(reader._id)}
-                                        className="flex-1 px-4 py-2 bg-red-500/20 border border-red-500/30 text-red-300 rounded-lg hover:bg-red-500/30 transition-all duration-300 flex items-center justify-center gap-2"
+                                        className="flex-1 px-4 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors flex items-center justify-center gap-2"
                                     >
                                         <Trash2 size={16} />
                                         Delete
@@ -237,133 +256,145 @@ const ReadersPage: React.FC = () => {
                         ))}
                     </div>
                 ) : (
-                    <div className={`transition-all duration-1000 transform ${isVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'}`} style={{ transitionDelay: '400ms' }}>
-                        <div className="bg-white/10 backdrop-blur-lg border border-white/20 rounded-2xl overflow-hidden">
-                            <div className="overflow-x-auto">
-                                <table className="w-full">
-                                    <thead>
-                                    <tr className="bg-white/10 border-b border-white/20">
-                                        <th className="p-4 text-left text-gray-300 font-semibold">ID</th>
-                                        <th className="p-4 text-left text-gray-300 font-semibold">Name</th>
-                                        <th className="p-4 text-left text-gray-300 font-semibold">Email</th>
-                                        <th className="p-4 text-left text-gray-300 font-semibold">Phone</th>
-                                        <th className="p-4 text-left text-gray-300 font-semibold">Address</th>
-                                        <th className="p-4 text-left text-gray-300 font-semibold">Actions</th>
+                    <div className="bg-white rounded-lg shadow-md border overflow-hidden">
+                        <div className="overflow-x-auto">
+                            <table className="w-full">
+                                <thead className="bg-gray-50">
+                                <tr>
+                                    <th className="p-4 text-left text-gray-700 font-semibold">ID</th>
+                                    <th className="p-4 text-left text-gray-700 font-semibold">Name</th>
+                                    <th className="p-4 text-left text-gray-700 font-semibold">Email</th>
+                                    <th className="p-4 text-left text-gray-700 font-semibold">Phone</th>
+                                    <th className="p-4 text-left text-gray-700 font-semibold">Address</th>
+                                    <th className="p-4 text-left text-gray-700 font-semibold">Status</th>
+                                    <th className="p-4 text-left text-gray-700 font-semibold">Actions</th>
+                                </tr>
+                                </thead>
+                                <tbody>
+                                {filteredReaders.map(reader => (
+                                    <tr key={reader._id} className="border-t hover:bg-gray-50 transition-colors">
+                                        <td className="p-4 text-gray-900">{reader.id}</td>
+                                        <td className="p-4 text-gray-900 font-medium">{reader.name}</td>
+                                        <td className="p-4 text-gray-700">{reader.email}</td>
+                                        <td className="p-4 text-gray-700">{reader.phone}</td>
+                                        <td className="p-4 text-gray-700 max-w-xs truncate">{reader.address}</td>
+                                        <td className="p-4">
+                                            <span className="px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                                Active
+                                            </span>
+                                        </td>
+                                        <td className="p-4">
+                                            <div className="flex gap-2">
+                                                <button
+                                                    onClick={() => {
+                                                        console.log('Editing reader:', reader); // Debug
+                                                        setEditingReader(reader);
+                                                    }}
+                                                    className="p-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors"
+                                                >
+                                                    <Edit3 size={16} />
+                                                </button>
+                                                <button
+                                                    onClick={() => handleDeleteReader(reader._id)}
+                                                    className="p-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors"
+                                                >
+                                                    <Trash2 size={16} />
+                                                </button>
+                                            </div>
+                                        </td>
                                     </tr>
-                                    </thead>
-                                    <tbody>
-                                    {filteredReaders.map(reader => (
-                                        <tr key={reader._id} className="border-b border-white/10 hover:bg-white/5 transition-colors duration-300">
-                                            <td className="p-4 text-white">{reader.id}</td>
-                                            <td className="p-4 text-white font-medium">{reader.name}</td>
-                                            <td className="p-4 text-gray-300">{reader.email}</td>
-                                            <td className="p-4 text-gray-300">{reader.phone}</td>
-                                            <td className="p-4 text-gray-300 max-w-xs truncate">{reader.address}</td>
-                                            <td className="p-4">
-                                                <div className="flex gap-2">
-                                                    <button
-                                                        onClick={() => setEditingReader(reader)}
-                                                        className="p-2 bg-blue-500/20 border border-blue-500/30 text-blue-300 rounded-lg hover:bg-blue-500/30 transition-all duration-300"
-                                                    >
-                                                        <Edit3 size={16} />
-                                                    </button>
-                                                    <button
-                                                        onClick={() => handleDeleteReader(reader._id)}
-                                                        className="p-2 bg-red-500/20 border border-red-500/30 text-red-300 rounded-lg hover:bg-red-500/30 transition-all duration-300"
-                                                    >
-                                                        <Trash2 size={16} />
-                                                    </button>
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                    </tbody>
-                                </table>
-                            </div>
+                                ))}
+                                </tbody>
+                            </table>
                         </div>
                     </div>
                 )}
 
                 {/* Add Reader Modal */}
                 {showAddForm && (
-                    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-                        <div className="bg-white/10 backdrop-blur-lg border border-white/20 rounded-2xl p-8 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-                            <div className="flex items-center justify-between mb-6">
-                                <h3 className="text-2xl font-bold text-white flex items-center gap-3">
-                                    <Plus className="text-green-400" />
-                                    Add New Reader
-                                </h3>
-                                <button onClick={() => setShowAddForm(false)} className="p-2 hover:bg-white/10 rounded-full transition-colors duration-300">
-                                    <X size={24} className="text-gray-400" />
-                                </button>
-                            </div>
-                            <div className="space-y-4">
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="block text-gray-300 mb-2">Reader ID</label>
-                                        <input
-                                            type="text"
-                                            value={newReader.id}
-                                            onChange={e => setNewReader({ ...newReader, id: e.target.value })}
-                                            className="w-full p-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-300"
-                                            placeholder="Enter reader ID"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-gray-300 mb-2">Full Name</label>
-                                        <input
-                                            type="text"
-                                            value={newReader.name}
-                                            onChange={e => setNewReader({ ...newReader, name: e.target.value })}
-                                            className="w-full p-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-300"
-                                            placeholder="Enter full name"
-                                        />
-                                    </div>
-                                </div>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="block text-gray-300 mb-2">Email Address</label>
-                                        <input
-                                            type="email"
-                                            value={newReader.email}
-                                            onChange={e => setNewReader({ ...newReader, email: e.target.value })}
-                                            className="w-full p-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-300"
-                                            placeholder="Enter email address"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-gray-300 mb-2">Phone Number</label>
-                                        <input
-                                            type="text"
-                                            value={newReader.phone}
-                                            onChange={e => setNewReader({ ...newReader, phone: e.target.value })}
-                                            className="w-full p-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-300"
-                                            placeholder="Enter phone number"
-                                        />
-                                    </div>
-                                </div>
-                                <div>
-                                    <label className="block text-gray-300 mb-2">Address</label>
-                                    <textarea
-                                        value={newReader.address}
-                                        onChange={e => setNewReader({ ...newReader, address: e.target.value })}
-                                        rows={3}
-                                        className="w-full p-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-300 resize-none"
-                                        placeholder="Enter full address"
-                                    />
-                                </div>
-                                <div className="flex gap-4 pt-4">
+                    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                        <div className="bg-white rounded-lg w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+                            <div className="p-6 border-b">
+                                <div className="flex items-center justify-between">
+                                    <h3 className="text-xl font-bold text-gray-900 flex items-center gap-3">
+                                        <Plus className="text-blue-600" />
+                                        Add New Reader
+                                    </h3>
                                     <button
-                                        type="button"
                                         onClick={() => setShowAddForm(false)}
-                                        className="flex-1 px-6 py-3 bg-white/10 border border-white/20 text-gray-300 rounded-lg hover:bg-white/20 transition-all duration-300"
+                                        className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+                                    >
+                                        <X size={20} className="text-gray-400" />
+                                    </button>
+                                </div>
+                            </div>
+                            <div className="p-6">
+                                <div className="space-y-4">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-gray-700 font-medium mb-2">Reader ID</label>
+                                            <input
+                                                type="text"
+                                                value={newReader.id}
+                                                onChange={e => setNewReader({ ...newReader, id: e.target.value })}
+                                                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                                placeholder="Enter reader ID"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-gray-700 font-medium mb-2">Full Name</label>
+                                            <input
+                                                type="text"
+                                                value={newReader.name}
+                                                onChange={e => setNewReader({ ...newReader, name: e.target.value })}
+                                                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                                placeholder="Enter full name"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-gray-700 font-medium mb-2">Email Address</label>
+                                            <input
+                                                type="email"
+                                                value={newReader.email}
+                                                onChange={e => setNewReader({ ...newReader, email: e.target.value })}
+                                                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                                placeholder="Enter email address"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-gray-700 font-medium mb-2">Phone Number</label>
+                                            <input
+                                                type="text"
+                                                value={newReader.phone}
+                                                onChange={e => setNewReader({ ...newReader, phone: e.target.value })}
+                                                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                                placeholder="Enter phone number"
+                                            />
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label className="block text-gray-700 font-medium mb-2">Address</label>
+                                        <textarea
+                                            value={newReader.address}
+                                            onChange={e => setNewReader({ ...newReader, address: e.target.value })}
+                                            rows={3}
+                                            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+                                            placeholder="Enter full address"
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="p-6 border-t bg-gray-50">
+                                <div className="flex gap-4">
+                                    <button
+                                        onClick={() => setShowAddForm(false)}
+                                        className="flex-1 px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
                                     >
                                         Cancel
                                     </button>
                                     <button
-                                        type="button"
                                         onClick={handleAddReader}
-                                        className="flex-1 px-6 py-3 bg-gradient-to-r from-green-500 to-teal-600 text-white rounded-lg hover:from-green-600 hover:to-teal-700 transition-all duration-300 flex items-center justify-center gap-2"
+                                        className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"
                                     >
                                         <Save size={18} />
                                         Add Reader
@@ -376,79 +407,84 @@ const ReadersPage: React.FC = () => {
 
                 {/* Edit Reader Modal */}
                 {editingReader && (
-                    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-                        <div className="bg-white/10 backdrop-blur-lg border border-white/20 rounded-2xl p-8 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-                            <div className="flex items-center justify-between mb-6">
-                                <h3 className="text-2xl font-bold text-white flex items-center gap-3">
-                                    <Edit3 className="text-blue-400" />
-                                    Edit Reader
-                                </h3>
-                                <button onClick={() => setEditingReader(null)} className="p-2 hover:bg-white/10 rounded-full transition-colors duration-300">
-                                    <X size={24} className="text-gray-400" />
-                                </button>
-                            </div>
-                            <div className="space-y-4">
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="block text-gray-300 mb-2">Reader ID</label>
-                                        <input
-                                            type="text"
-                                            value={editingReader.id}
-                                            onChange={e => setEditingReader({ ...editingReader, id: e.target.value })}
-                                            className="w-full p-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-300"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-gray-300 mb-2">Full Name</label>
-                                        <input
-                                            type="text"
-                                            value={editingReader.name}
-                                            onChange={e => setEditingReader({ ...editingReader, name: e.target.value })}
-                                            className="w-full p-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-300"
-                                        />
-                                    </div>
-                                </div>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="block text-gray-300 mb-2">Email Address</label>
-                                        <input
-                                            type="email"
-                                            value={editingReader.email}
-                                            onChange={e => setEditingReader({ ...editingReader, email: e.target.value })}
-                                            className="w-full p-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-300"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-gray-300 mb-2">Phone Number</label>
-                                        <input
-                                            type="text"
-                                            value={editingReader.phone}
-                                            onChange={e => setEditingReader({ ...editingReader, phone: e.target.value })}
-                                            className="w-full p-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-300"
-                                        />
-                                    </div>
-                                </div>
-                                <div>
-                                    <label className="block text-gray-300 mb-2">Address</label>
-                                    <textarea
-                                        value={editingReader.address}
-                                        onChange={e => setEditingReader({ ...editingReader, address: e.target.value })}
-                                        rows={3}
-                                        className="w-full p-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-300 resize-none"
-                                    />
-                                </div>
-                                <div className="flex gap-4 pt-4">
+                    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                        <div className="bg-white rounded-lg w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+                            <div className="p-6 border-b">
+                                <div className="flex items-center justify-between">
+                                    <h3 className="text-xl font-bold text-gray-900 flex items-center gap-3">
+                                        <Edit3 className="text-blue-600" />
+                                        Edit Reader
+                                    </h3>
                                     <button
-                                        type="button"
                                         onClick={() => setEditingReader(null)}
-                                        className="flex-1 px-6 py-3 bg-white/10 border border-white/20 text-gray-300 rounded-lg hover:bg-white/20 transition-all duration-300"
+                                        className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+                                    >
+                                        <X size={20} className="text-gray-400" />
+                                    </button>
+                                </div>
+                            </div>
+                            <div className="p-6">
+                                <div className="space-y-4">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-gray-700 font-medium mb-2">Reader ID</label>
+                                            <input
+                                                type="text"
+                                                value={editingReader.id}
+                                                onChange={e => setEditingReader({ ...editingReader, id: e.target.value })}
+                                                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-gray-700 font-medium mb-2">Full Name</label>
+                                            <input
+                                                type="text"
+                                                value={editingReader.name}
+                                                onChange={e => setEditingReader({ ...editingReader, name: e.target.value })}
+                                                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-gray-700 font-medium mb-2">Email Address</label>
+                                            <input
+                                                type="email"
+                                                value={editingReader.email}
+                                                onChange={e => setEditingReader({ ...editingReader, email: e.target.value })}
+                                                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-gray-700 font-medium mb-2">Phone Number</label>
+                                            <input
+                                                type="text"
+                                                value={editingReader.phone}
+                                                onChange={e => setEditingReader({ ...editingReader, phone: e.target.value })}
+                                                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                            />
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label className="block text-gray-700 font-medium mb-2">Address</label>
+                                        <textarea
+                                            value={editingReader.address}
+                                            onChange={e => setEditingReader({ ...editingReader, address: e.target.value })}
+                                            rows={3}
+                                            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="p-6 border-t bg-gray-50">
+                                <div className="flex gap-4">
+                                    <button
+                                        onClick={() => setEditingReader(null)}
+                                        className="flex-1 px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
                                     >
                                         Cancel
                                     </button>
                                     <button
-                                        type="button"
                                         onClick={handleEditReader}
-                                        className="flex-1 px-6 py-3 bg-gradient-to-r from-blue-500 to-purple-600 text-white rounded-lg hover:from-blue-600 hover:to-purple-700 transition-all duration-300 flex items-center justify-center gap-2"
+                                        className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"
                                     >
                                         <Save size={18} />
                                         Save Changes

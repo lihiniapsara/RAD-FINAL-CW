@@ -13,7 +13,7 @@ export const authenticateToken = (req:express.Request, res:express.Response, nex
         }
         jwt.verify(
             token,
-            process.env.ACCESS_TOKEN_SECRET !,
+            process.env.ACCESS_TOKEN_SECRET || 'default_access_token_secret_2024',
             (err , decoded) => {
                 if (err) {
                     if (err instanceof TokenExpiredError) {

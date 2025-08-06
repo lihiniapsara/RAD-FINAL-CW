@@ -1,21 +1,21 @@
 import axios, {type AxiosInstance } from 'axios';
 
 const apiClient: AxiosInstance = axios.create({
-    baseURL: import.meta.env.VITE_API_URL || 'http://localhost:3001/api',
+    baseURL: import.meta.env.VITE_API_URL || 'http://localhost:3001',
     headers: {
-        'Content-Type': 'application/json',
-    },
+        'Content-Type': 'application/json'
+    }
 });
 
 apiClient.interceptors.request.use(
-    (config) => {
-        const token = localStorage.getItem('accessToken');
+    config => {
+        const token = localStorage.getItem('token');
         if (token) {
             config.headers.Authorization = `Bearer ${token}`;
         }
         return config;
     },
-    (error) => Promise.reject(error)
+    error => Promise.reject(error)
 );
 
 apiClient.interceptors.response.use(
@@ -27,11 +27,11 @@ apiClient.interceptors.response.use(
             try {
                 const response = await axios.post('/auth/refresh-token', {}, { withCredentials: true });
                 const { accessToken } = response.data;
-                localStorage.setItem('accessToken', accessToken);
+                localStorage.setItem('token', accessToken);
                 originalRequest.headers.Authorization = `Bearer ${accessToken}`;
                 return apiClient(originalRequest);
             } catch (refreshError) {
-                localStorage.removeItem('accessToken');
+                localStorage.removeItem('token');
                 localStorage.removeItem('user');
                 window.location.href = '/login';
                 return Promise.reject(refreshError);

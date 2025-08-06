@@ -13,7 +13,7 @@ const app = express();
 
 //handle cors
 const corsOptions = {
-    origin: process.env.CLIENT_ORIGIN, // <-- spelling fixed
+    origin: process.env.CLIENT_ORIGIN || 'http://localhost:3000', // <-- spelling fixed
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE"],
     allowedHeaders: ["Content-Type", "Authorization"]
@@ -24,7 +24,7 @@ app.use(cors(corsOptions))
 app.use(express.json())
 app.use(cookieParser())
 
-const PORT = process.env.PORT ;
+const PORT = process.env.PORT || 3001;
 
 // Routes
 app.use('/api', rootRouter);

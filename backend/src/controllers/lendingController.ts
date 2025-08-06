@@ -1,7 +1,10 @@
 import { Request, Response, NextFunction } from 'express';
-import {Lending} from '../models/Lending';
-import {Book} from '../models/Book';
+import { Lending } from '../models/Lending';
+import { Book } from '../models/Book';
+import { Reader } from '../models/Reader'; // Reader model එක import කරන්න
 import { APIError } from '../errors/APIError';
+import { v4 as uuidv4 } from 'uuid';
+import mongoose from 'mongoose';
 
 const currentTime = () => new Date().toLocaleString('en-US', { timeZone: 'Asia/Colombo', hour12: true });
 
@@ -10,12 +13,33 @@ export const lendBook = async (req: Request, res: Response, next: NextFunction) 
   try {
     const { readerId, bookId } = req.body;
 
+    // Validate input
+    if (!readerId || !bookId) {
+      console.log(`[${currentTime()}] Missing readerId or bookId`);
+      return next(new APIError(400, 'readerId and bookId are required'));
+    }
+
+    // Validate ObjectIds
+    if (!mongoose.Types.ObjectId.isValid(readerId) || !mongoose.Types.ObjectId.isValid(bookId)) {
+      console.log(`[${currentTime()}] Invalid readerId or bookId: ${readerId}, ${bookId}`);
+      return next(new APIError(400, 'Invalid readerId or bookId format'));
+    }
+
+    // Check if reader exists
+    const reader = await Reader.findById(readerId);
+    if (!reader) {
+      console.log(`[${currentTime()}] Reader not found: ID ${readerId}`);
+      return next(new APIError(404, 'Reader not found'));
+    }
+
+    // Check if book exists
     const book = await Book.findById(bookId);
     if (!book) {
       console.log(`[${currentTime()}] Book not found for lending: ID ${bookId}`);
       return next(new APIError(404, 'Book not found'));
     }
 
+    // Check book quantity
     if (book.quantity <= 0) {
       console.log(`[${currentTime()}] Book out of stock: ID ${bookId}`);
       return next(new APIError(400, 'Book is out of stock'));
@@ -25,6 +49,7 @@ export const lendBook = async (req: Request, res: Response, next: NextFunction) 
     dueDate.setDate(dueDate.getDate() + 14); // due in 14 days
 
     const lending = new Lending({
+      id: uuidv4(), // Use uuidv4() for unique ID
       readerId,
       bookId,
       borrowedDate: new Date(),
@@ -39,8 +64,14 @@ export const lendBook = async (req: Request, res: Response, next: NextFunction) 
 
     console.log(`[${currentTime()}] Book lent: ID ${bookId} to Reader ${readerId}`);
     res.status(201).json(lending);
-  } catch (err) {
+  } catch (err: any) {
     console.error(`[${currentTime()}] Error lending book:`, err);
+    if (err.name === 'ValidationError') {
+      return next(new APIError(400, `Lending validation failed: ${err.message}`));
+    }
+    if (err.name === 'CastError') {
+      return next(new APIError(400, 'Invalid readerId or bookId'));
+    }
     next(new APIError(500, 'Failed to lend book'));
   }
 };
@@ -76,7 +107,6 @@ export const returnBook = async (req: Request, res: Response, next: NextFunction
     next(new APIError(500, 'Failed to return book'));
   }
 };
-
 // Get all lending records
 export const getAllLendings = async (_req: Request, res: Response, next: NextFunction) => {
   try {
