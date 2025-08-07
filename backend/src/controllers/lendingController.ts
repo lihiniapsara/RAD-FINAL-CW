@@ -119,34 +119,3 @@ export const getAllLendings = async (_req: Request, res: Response, next: NextFun
   }
 };
 
-// Get lending records by reader
-export const getLendingsByReader = async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const records = await Lending.find({ readerId: req.params.readerId }).populate('bookId');
-    if (records.length === 0) {
-      console.log(`[${currentTime()}] No lendings found for Reader ID ${req.params.readerId}`);
-      return res.status(404).json({ message: 'No lendings found for this reader' });
-    }
-    console.log(`[${currentTime()}] Fetched lendings for Reader ID ${req.params.readerId}: ${records.length} records`);
-    res.json(records);
-  } catch (err) {
-    console.error(`[${currentTime()}] Error fetching lendings by Reader ID ${req.params.readerId}:`, err);
-    next(new APIError(500, 'Failed to fetch lendings by reader'));
-  }
-};
-
-// Get lending records by book
-export const getLendingsByBook = async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const records = await Lending.find({ bookId: req.params.bookId }).populate('readerId');
-    if (records.length === 0) {
-      console.log(`[${currentTime()}] No lendings found for Book ID ${req.params.bookId}`);
-      return res.status(404).json({ message: 'No lendings found for this book' });
-    }
-    console.log(`[${currentTime()}] Fetched lendings for Book ID ${req.params.bookId}: ${records.length} records`);
-    res.json(records);
-  } catch (err) {
-    console.error(`[${currentTime()}] Error fetching lendings by Book ID ${req.params.bookId}:`, err);
-    next(new APIError(500, 'Failed to fetch lendings by book'));
-  }
-};

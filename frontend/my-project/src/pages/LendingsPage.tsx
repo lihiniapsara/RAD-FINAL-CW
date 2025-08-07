@@ -3,9 +3,10 @@ import { RefreshCw, Search, Plus, Filter, Calendar, Clock, User, BookOpen, Check
 import type { Reader } from '@/types/Readers';
 import type { BorrowBook } from '@/types/BorrowBook';
 import type { Book } from '@/types/Books';
-import { getLendings, lendBook, returnBook } from '@/service/borrowBookService';
+import {getLendings, lendBook, returnBook, sendOverdueNotifications} from '@/service/borrowBookService';
 import { getReaders } from '@/service/readerService';
 import { getBooks } from '@/service/bookService';
+import type {Email} from "@/types/Email.ts";
 
 // Extended interfaces
 interface EmailNotification {
@@ -192,7 +193,9 @@ const LendingsPage: React.FC = () => {
         return daysSinceLastEmail >= 7;
     };
 
-    const sendOverdueEmail = (lending: ExtendedBorrowBook) => {
+
+
+    const sendOverdueEmail = async (lending: ExtendedBorrowBook) => {
         const notification: EmailNotification = {
             id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
             readerId: lending.readerId._id,
@@ -205,6 +208,32 @@ const LendingsPage: React.FC = () => {
             type: 'overdue',
         };
 
+        const emailData: Email = {
+            to: lending.readerId.email,
+            subject: 'Overdue Book Notification',
+            body: `
+Dear ${lending.readerId.name},
+
+We hope this message finds you well. This is a friendly reminder that the book "${lending.bookId.title}" you borrowed is now overdue.
+
+**Details:**
+- **Book Title**: ${lending.bookId.title}
+- **Due Date**: ${new Date(lending.dueDate).toLocaleDateString()}
+- **Days Overdue**: ${getDaysOverdue(lending.dueDate)} day(s)
+
+Please return the book to the library at your earliest convenience to avoid any additional fees. If you have already returned the book, kindly disregard this message.
+
+For any questions or to discuss an extension, please contact us at library@support.com or visit our library during operating hours.
+
+Thank you for your prompt attention to this matter.
+
+Best regards,  
+Your Library Team
+        `,
+        };
+
+        const response = await sendOverdueNotifications(emailData);
+
         setEmailNotifications(prev => [...prev, notification]);
         setLendings(prev =>
             prev.map(l => l._id === lending._id ? { ...l, emailSent: true, lastEmailDate: new Date().toISOString().split('T')[0] } : l)
@@ -212,7 +241,6 @@ const LendingsPage: React.FC = () => {
 
         console.log(`Overdue email sent to ${lending.readerId.email} for book "${lending.bookId.title}"`);
     };
-
     const handleManualEmailSend = (lending: ExtendedBorrowBook) => {
         sendOverdueEmail(lending);
         setShowEmailModal(false);

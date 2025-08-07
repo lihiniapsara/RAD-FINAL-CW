@@ -1,5 +1,6 @@
 import apiClient from './apiClient';
 import type { BorrowBook } from '@/types/BorrowBook';
+import type {Email} from "@/types/Email.ts";
 
 export const getLendings = async (): Promise<BorrowBook[]> => {
     const response = await apiClient.get('/api/lendings'); // Updated to /api/lendings
@@ -16,17 +17,7 @@ export const returnBook = async (id: string): Promise<BorrowBook> => {
     return response.data;
 };
 
-export const getLendingsByReader = async (readerId: string): Promise<BorrowBook[]> => {
-    const response = await apiClient.get(`/api/lendings/reader/${readerId}`); // Updated to /api/lendings/reader/:readerId
-    return response.data;
-};
-
-export const getLendingsByBook = async (bookId: string): Promise<BorrowBook[]> => {
-    const response = await apiClient.get(`/api/lendings/book/${bookId}`); // Updated to /api/lendings/book/:bookId
-    return response.data;
-};
-
-export const sendOverdueNotifications = async (): Promise<{ message: string }> => {
-    const response = await apiClient.post('/api/notifications/send-overdue-notifications'); // Updated to /api/notifications/send-overdue-notifications
+export const sendOverdueNotifications = async (emailData: Email): Promise<{ notify: Email }> => {
+    const response = await apiClient.post('/api/notifications' , emailData); // Updated to /api/notifications/send-overdue-notifications
     return response.data;
 };

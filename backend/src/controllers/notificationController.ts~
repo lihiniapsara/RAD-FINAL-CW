@@ -5,10 +5,10 @@ import {Email} from "../models/Email";
 const transporter = nodemailer.createTransport({
     service: 'gmail',
     auth: {
-        user: 'apsaralihini11@gmail.com',
-       // user: process.env.EMAIL_USER,
-        pass: 'zgaorzqgmvsjgvpp',
-       // pass: process.env.EMAIL_PASSWORD
+        //user: 'apsaralihini11@gmail.com',
+        user: process.env.EMAIL_USER,
+       // pass: 'zgaorzqgmvsjgvpp',
+        pass: process.env.EMAIL_PASSWORD
     },
 });
 

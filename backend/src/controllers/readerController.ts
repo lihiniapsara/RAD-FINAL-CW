@@ -16,21 +16,6 @@ export const getAllReaders = async (req: Request, res: Response, next: NextFunct
   }
 };
 
-// Get reader by ID
-export const getReaderById = async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const reader = await Reader.findById(req.params.id);
-    if (!reader) {
-      console.log(`[${currentTime()}] Reader not found: ID ${req.params.id}`);
-      return next(new APIError(404, 'Reader not found'));
-    }
-    console.log(`[${currentTime()}] Fetched reader: ID ${req.params.id}`);
-    res.status(200).json(reader);
-  } catch (error) {
-    console.error(`[${currentTime()}] Error fetching reader ID ${req.params.id}:`, error);
-    next(new APIError(500, 'Failed to fetch reader'));
-  }
-};
 
 // Add new reader
 export const addReader = async (req: Request, res: Response, next: NextFunction) => {

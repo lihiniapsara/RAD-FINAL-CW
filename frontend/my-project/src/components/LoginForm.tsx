@@ -5,6 +5,7 @@ import { useDispatch } from 'react-redux';
 import { login as loginAction } from '../store/slice/AuthSlice';
 import type { LoginData, SignupData, User as AppUser } from '@/types/user';
 import {login, signup} from "@/service/userService.ts";
+import Footer from "@/components/Footer.tsx";
 interface ValidationState {
   email: { isValid: boolean; message: string };
   password: { isValid: boolean; message: string };
@@ -374,9 +375,7 @@ const LoginForm: React.FC = () => {
               </div>
             </div>
           </div>
-          <div className="text-center mt-6 text-sm text-gray-500">
-            © 2025 LibraryHub. Secure & Modern Library Management
-          </div>
+          <Footer />
         </div>
       </div>
   );

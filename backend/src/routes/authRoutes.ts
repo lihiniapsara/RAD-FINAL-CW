@@ -12,13 +12,13 @@ import { authenticateToken } from '../middleware/authenticateToken';
 const authRouter = Router();
 
 // Public Routes
-authRouter.post('/signup', signUp);        // POST /api/auth/signup
-authRouter.post('/login', login);          // POST /api/auth/login
-authRouter.post('/refresh-token', refreshToken); // POST /api/auth/refresh-token
-authRouter.post('/logout', logout);        // POST /api/auth/logout
+authRouter.post('/signup', signUp);
+authRouter.post('/login', login);
+authRouter.post('/refresh-token', refreshToken);
+authRouter.post('/logout', logout);
 
 // Admin Routes (Require Authentication)
-authRouter.post('/register',registerUser);  // POST /api/auth/register (admin only)
-authRouter.get('/users', authenticateToken, getAllUsers);       // GET /api/auth/users
+authRouter.post('/register',registerUser);
+authRouter.get('/users', authenticateToken, getAllUsers);
 
 export default authRouter;

@@ -5,7 +5,7 @@ import { APIError } from '../errors/APIError';
 const currentTime = () =>
     new Date().toLocaleString('en-US', { timeZone: 'Asia/Colombo', hour12: true });
 
-// ✅ Get all books
+//  Get all books
 export const getAllBooks = async (req: Request, res: Response, next: NextFunction) => {
     try {
         const books = await Book.find();
@@ -17,23 +17,8 @@ export const getAllBooks = async (req: Request, res: Response, next: NextFunctio
     }
 };
 
-// ✅ Get single book by ID
-export const getBookById = async (req: Request, res: Response, next: NextFunction) => {
-    try {
-        const book = await Book.findById(req.params.id);
-        if (!book) {
-            console.log(`[${currentTime()}] Book not found: ID ${req.params.id}`);
-            return next(new APIError(404, 'Book not found'));
-        }
-        console.log(`[${currentTime()}] Fetched book: ID ${req.params.id}`);
-        res.json(book);
-    } catch (err) {
-        console.error(`[${currentTime()}] Error fetching book ID ${req.params.id}:`, err);
-        next(new APIError(500, 'Failed to fetch book'));
-    }
-};
 
-// ✅ Add new book
+//  Add new book
 export const addBook = async (req: Request, res: Response, next: NextFunction) => {
     try {
         const { id, title, author, genre, language, quantity, available } = req.body;
@@ -62,7 +47,7 @@ export const addBook = async (req: Request, res: Response, next: NextFunction) =
     }
 };
 
-// ✅ Update book
+//  Update book
 export const updateBook = async (req: Request, res: Response, next: NextFunction) => {
     try {
         const updated = await Book.findByIdAndUpdate(req.params.id, req.body, { new: true });
@@ -78,7 +63,7 @@ export const updateBook = async (req: Request, res: Response, next: NextFunction
     }
 };
 
-// ✅ Delete book
+//  Delete book
 export const deleteBook = async (req: Request, res: Response, next: NextFunction) => {
     try {
         const deleted = await Book.findByIdAndDelete(req.params.id);
